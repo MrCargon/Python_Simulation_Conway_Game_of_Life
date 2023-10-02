@@ -11,7 +11,7 @@ WIDTH, HEIGHT = 800, 800
 TILE_SIZE = 20
 GRID_WIDTH = WIDTH // TILE_SIZE
 GRID_HEIGHT = HEIGHT // TILE_SIZE
-FPS = 60
+FPS = 120
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
@@ -81,7 +81,7 @@ def main():
         clock.tick(FPS)
 
         if playing:
-            count += 1
+            count += 10
         
         if count >= update_freq:
             count = 0
