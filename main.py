@@ -1,127 +1,204 @@
 import pygame
 import random
+from typing import Set, Tuple, List, Optional
+from dataclasses import dataclass
 
-pygame.init()
+# Constants
+@dataclass
+class Colors:
+    BLACK: Tuple[int, int, int] = (0, 0, 0)
+    GREY: Tuple[int, int, int] = (128, 128, 128)
+    YELLOW: Tuple[int, int, int] = (255, 255, 0)
+    GREEN: Tuple[int, int, int] = (0, 255, 0)
+    RED: Tuple[int, int, int] = (255, 0, 0)
 
-BLACK = (0, 0, 0)
-GREY = (128, 128, 128)
-YELLOW = (255, 255, 0)
+@dataclass
+class GameConfig:
+    WIDTH: int = 800
+    HEIGHT: int = 800
+    TILE_SIZE: int = 20
+    FPS: int = 60
+    MIN_SPEED: int = 1
+    MAX_SPEED: int = 10
+    DEFAULT_SPEED: int = 5
 
-WIDTH, HEIGHT = 800, 800
-TILE_SIZE = 20
-GRID_WIDTH = WIDTH // TILE_SIZE
-GRID_HEIGHT = HEIGHT // TILE_SIZE
-FPS = 120
-
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-
-clock = pygame.time.Clock()
-
-def gen(num):
-    return set([(random.randrange(0, GRID_HEIGHT), random.randrange(0, GRID_WIDTH)) for _ in range(num)])
-
-def draw_grid(positions):
-    for position in positions:
-        col, row = position
-        top_left = (col * TILE_SIZE, row * TILE_SIZE)
-        pygame.draw.rect(screen, YELLOW, (*top_left, TILE_SIZE, TILE_SIZE))
-
-    for row in range(GRID_HEIGHT):
-        pygame.draw.line(screen, BLACK, (0, row * TILE_SIZE), (WIDTH, row * TILE_SIZE))
-
-    for col in range(GRID_WIDTH):
-        pygame.draw.line(screen, BLACK, (col * TILE_SIZE, 0), (col * TILE_SIZE, HEIGHT))
-
-def adjust_grid(positions):
-    all_neighbors = set()
-    new_positions = set()
-
-    for position in positions:
-        neighbors = get_neighbors(position)
-        all_neighbors.update(neighbors)
-
-        neighbors = list(filter(lambda x: x in positions, neighbors))
-
-        if len(neighbors) in [2, 3]:
-            new_positions.add(position)
-    
-    for position in all_neighbors:
-        neighbors = get_neighbors(position)
-        neighbors = list(filter(lambda x: x in positions, neighbors))
-
-        if len(neighbors) == 3:
-            new_positions.add(position)
-    
-    return new_positions
-
-def get_neighbors(pos):
-    x, y = pos
-    neighbors = []
-    for dx in [-1, 0, 1]:
-        if x + dx < 0 or x + dx > GRID_WIDTH:
-            continue
-        for dy in [-1, 0, 1]:
-            if y + dy < 0 or y + dy > GRID_HEIGHT:
-                continue
-            if dx == 0 and dy == 0:
-                continue
-
-            neighbors.append((x + dx, y + dy))
-    
-    return neighbors
-
-def main():
-    running = True
-    playing = False
-    count = 0
-    update_freq = 120
-
-    positions = set()
-    while running:
-        clock.tick(FPS)
-
-        if playing:
-            count += 10
+class GameOfLife:
+    def __init__(self, config: GameConfig = GameConfig()):
+        pygame.init()
+        self.config = config
+        self.colors = Colors()
         
-        if count >= update_freq:
-            count = 0
-            positions = adjust_grid(positions)
+        # Calculate grid dimensions
+        self.GRID_WIDTH = self.config.WIDTH // self.config.TILE_SIZE
+        self.GRID_HEIGHT = self.config.HEIGHT // self.config.TILE_SIZE
+        
+        # Initialize pygame
+        self.screen = pygame.display.set_mode((self.config.WIDTH, self.config.HEIGHT))
+        pygame.display.set_caption("Conway's Game of Life")
+        self.clock = pygame.time.Clock()
+        
+        # Game state
+        self.positions: Set[Tuple[int, int]] = set()
+        self.running: bool = True
+        self.playing: bool = False
+        self.speed: int = self.config.DEFAULT_SPEED
+        self.generation: int = 0
+        self.population: int = 0
+        
+        # UI elements
+        self.font = pygame.font.Font(None, 36)
 
-        pygame.display.set_caption("Playing" if playing else "Paused")
+    def generate_random_cells(self, density: float = 0.3) -> Set[Tuple[int, int]]:
+        """Generate random initial state with specified density (0.0 to 1.0)"""
+        total_cells = int(self.GRID_WIDTH * self.GRID_HEIGHT * density)
+        return set([(random.randrange(0, self.GRID_HEIGHT), 
+                    random.randrange(0, self.GRID_WIDTH)) 
+                   for _ in range(total_cells)])
 
+    def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Get valid neighbors for a given position"""
+        x, y = pos
+        neighbors = []
+        
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+                    
+                new_x, new_y = x + dx, y + dy
+                
+                # Implement wrapping around edges
+                new_x = new_x % self.GRID_WIDTH
+                new_y = new_y % self.GRID_HEIGHT
+                
+                neighbors.append((new_x, new_y))
+                
+        return neighbors
+
+    def update_grid(self) -> Set[Tuple[int, int]]:
+        """Update the grid according to Conway's Game of Life rules"""
+        new_positions = set()
+        candidates = set()
+        
+        # Add all neighbors of live cells to candidates
+        for pos in self.positions:
+            candidates.add(pos)
+            candidates.update(self.get_neighbors(pos))
+        
+        # Check each candidate
+        for pos in candidates:
+            neighbors = self.get_neighbors(pos)
+            live_neighbors = sum(1 for n in neighbors if n in self.positions)
+            
+            # Apply Conway's rules
+            if pos in self.positions:
+                if live_neighbors in [2, 3]:
+                    new_positions.add(pos)
+            else:
+                if live_neighbors == 3:
+                    new_positions.add(pos)
+        
+        return new_positions
+
+    def draw_grid(self) -> None:
+        """Draw the game grid and cells"""
+        self.screen.fill(self.colors.GREY)
+        
+        # Draw live cells
+        for position in self.positions:
+            col, row = position
+            top_left = (col * self.config.TILE_SIZE, row * self.config.TILE_SIZE)
+            pygame.draw.rect(self.screen, self.colors.YELLOW, 
+                           (*top_left, self.config.TILE_SIZE, self.config.TILE_SIZE))
+        
+        # Draw grid lines
+        for row in range(self.GRID_HEIGHT + 1):
+            pygame.draw.line(self.screen, self.colors.BLACK, 
+                           (0, row * self.config.TILE_SIZE), 
+                           (self.config.WIDTH, row * self.config.TILE_SIZE))
+        
+        for col in range(self.GRID_WIDTH + 1):
+            pygame.draw.line(self.screen, self.colors.BLACK, 
+                           (col * self.config.TILE_SIZE, 0), 
+                           (col * self.config.TILE_SIZE, self.config.HEIGHT))
+
+    def draw_ui(self) -> None:
+        """Draw UI elements including status and controls"""
+        # Draw status bar
+        status_text = f"Generation: {self.generation} | Population: {len(self.positions)} | Speed: {self.speed}x"
+        status = self.font.render(status_text, True, self.colors.BLACK)
+        self.screen.blit(status, (10, 10))
+        
+        # Draw controls help
+        controls = [
+            "Space: Play/Pause",
+            "C: Clear",
+            "R: Random",
+            "Up/Down: Speed",
+            "Click: Toggle Cell"
+        ]
+        
+        for i, text in enumerate(controls):
+            control = self.font.render(text, True, self.colors.BLACK)
+            self.screen.blit(control, (10, 50 + i * 30))
+
+    def handle_events(self) -> None:
+        """Handle pygame events"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
-            
-            if event.type == pygame.MOUSEBUTTONDOWN:
+                self.running = False
+                
+            elif event.type == pygame.MOUSEBUTTONDOWN:
                 x, y = pygame.mouse.get_pos()
-                col = x // TILE_SIZE
-                row = y // TILE_SIZE
+                col = x // self.config.TILE_SIZE
+                row = y // self.config.TILE_SIZE
                 pos = (col, row)
-
-                if pos in positions:
-                    positions.remove(pos)
+                
+                if pos in self.positions:
+                    self.positions.remove(pos)
                 else:
-                    positions.add(pos)
-            
-            if event.type == pygame.KEYDOWN:
+                    self.positions.add(pos)
+                    
+            elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
-                    playing = not playing
-                
-                if event.key == pygame.K_c:
-                    positions = set()
-                    playing = False
-                    count = 0
-                
-                if event.key == pygame.K_g:
-                    positions = gen(random.randrange(4, 10) * GRID_WIDTH)
-    
-        screen.fill(GREY)
-        draw_grid(positions)
-        pygame.display.update()
+                    self.playing = not self.playing
+                    
+                elif event.key == pygame.K_c:
+                    self.positions.clear()
+                    self.playing = False
+                    self.generation = 0
+                    
+                elif event.key == pygame.K_r:
+                    self.positions = self.generate_random_cells()
+                    
+                elif event.key == pygame.K_UP:
+                    self.speed = min(self.speed + 1, self.config.MAX_SPEED)
+                    
+                elif event.key == pygame.K_DOWN:
+                    self.speed = max(self.speed - 1, self.config.MIN_SPEED)
 
-
-    pygame.quit()
+    def run(self) -> None:
+        """Main game loop"""
+        update_counter = 0
+        
+        while self.running:
+            self.clock.tick(self.config.FPS)
+            self.handle_events()
+            
+            if self.playing:
+                update_counter += self.speed
+                
+                if update_counter >= self.config.FPS // 10:
+                    update_counter = 0
+                    self.positions = self.update_grid()
+                    self.generation += 1
+            
+            self.draw_grid()
+            self.draw_ui()
+            pygame.display.update()
+        
+        pygame.quit()
 
 if __name__ == "__main__":
-    main()
+    game = GameOfLife()
+    game.run()
